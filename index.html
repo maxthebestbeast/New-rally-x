@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
   <title>New Rally-X Clone</title>
   <style>
     body { margin: 0; background: black; color: white; font-family: sans-serif; overflow: hidden; }
@@ -20,205 +20,241 @@
 <body>
   <audio id="bg-music" autoplay loop>
     <source src="https://archive.org/download/NewRallyX/Namco%20-%20New%20Rally-X%20-%20BGM.mp3" type="audio/mpeg">
-    Your browser does not support the audio element.
   </audio>
   <canvas id="game" width="800" height="600"></canvas>
   <canvas id="radar" width="150" height="150"></canvas>
   <script>
-const canvas = document.getElementById("game");
-const ctx = canvas.getContext("2d");
-const radar = document.getElementById("radar");
-const radarCtx = radar.getContext("2d");
-const tileSize = 20;
-const mapWidth = 40;
-const mapHeight = 30;
-const floor = 0, wall = 1, flag = 2, specialFlag = 3;
-let player, redCars = [], map = [], flags = [], score = 0, highScore = 20000, level = 1;
-let keys = {}, smoke = [], fuel = 90, lives = 3, bonus = false, fuelTimer;
+    const canvas = document.getElementById("game");
+    const ctx = canvas.getContext("2d");
+    const radar = document.getElementById("radar");
+    const rctx = radar.getContext("2d");
 
-document.addEventListener("keydown", e => keys[e.key] = true);
-document.addEventListener("keyup", e => keys[e.key] = false);
+    const tileSize = 20;
+    const mapWidth = 40;
+    const mapHeight = 30;
+    const floor = 0, wall = 1, flag = 2, bonusFlag = 3;
 
-function generateMapWithDeadEnds() {
-  let newMap;
-  do {
-    newMap = Array.from({ length: mapHeight }, () =>
-      Array.from({ length: mapWidth }, () => Math.random() < 0.2 ? wall : floor)
-    );
-  } while (!addDeadEnds(newMap));
-  return newMap;
-}
-function addDeadEnds(map) {
-  let added = 0, attempts = 0;
-  while (added < 2 && attempts < 1000) {
-    const x = 2 + Math.floor(Math.random() * (mapWidth - 4));
-    const y = 2 + Math.floor(Math.random() * (mapHeight - 4));
-    if (map[y][x] !== floor) { attempts++; continue; }
-    const directions = [[0, -1], [0, 1], [-1, 0], [1, 0]];
-    const openDir = directions[Math.floor(Math.random() * directions.length)];
-    let success = true;
-    for (const [dx, dy] of directions) {
-      if (dx === openDir[0] && dy === openDir[1]) continue;
-      if (map[y + dy][x + dx] === floor) { success = false; break; }
-    }
-    if (success) {
-      for (const [dx, dy] of directions) {
-        if (dx === openDir[0] && dy === openDir[1]) continue;
-        map[y + dy][x + dx] = wall;
+    let map, player, redCars = [], flags = [], smoke = [];
+    let score = 0, highScore = 20000, level = 1, fuel = 90, lives = 3;
+    let bonusLevel = false, keys = {};
+    let fuelInterval;
+
+    document.addEventListener("keydown", e => keys[e.key] = true);
+    document.addEventListener("keyup", e => keys[e.key] = false);
+
+    function createMaze() {
+      // Generate empty map with walls around
+      map = Array.from({ length: mapHeight }, (_, y) =>
+        Array.from({ length: mapWidth }, (_, x) =>
+          (x === 0 || y === 0 || x === mapWidth - 1 || y === mapHeight - 1) ? wall : floor
+        )
+      );
+
+      // Add vertical corridors
+      for (let x = 2; x < mapWidth - 2; x += 4) {
+        for (let y = 1; y < mapHeight - 1; y++) {
+          if (Math.random() > 0.2) map[y][x] = wall;
+        }
       }
-      map[y][x] = floor;
-      added++;
-    }
-    attempts++;
-  }
-  return added === 2;
-}
 
-function initPlayer() {
-  return { x: 1, y: 1, color: "blue", speed: 2 };
-}
-function spawnRedCars(n) {
-  redCars = [];
-  for (let i = 0; i < n; i++) {
-    let x = Math.floor(Math.random() * mapWidth);
-    let y = Math.floor(Math.random() * mapHeight);
-    while (map[y][x] !== floor) {
-      x = Math.floor(Math.random() * mapWidth);
-      y = Math.floor(Math.random() * mapHeight);
-    }
-    redCars.push({ x, y, color: "red", speed: 2, stunned: false });
-  }
-}
-function placeFlags() {
-  flags = [];
-  while (flags.length < 10) {
-    let x = Math.floor(Math.random() * mapWidth);
-    let y = Math.floor(Math.random() * mapHeight);
-    if (map[y][x] === floor && !flags.some(f => f.x === x && f.y === y)) {
-      map[y][x] = (flags.length === 0) ? specialFlag : flag;
-      flags.push({ x, y, special: flags.length === 0 });
-    }
-  }
-}
-function startFuelTimer() {
-  clearInterval(fuelTimer);
-  fuel = 90;
-  fuelTimer = setInterval(() => {
-    fuel--;
-    if (fuel <= 0) {
-      clearInterval(fuelTimer);
-      if (bonus) nextLevel();
-      else loseLife();
-    }
-  }, 1000);
-}
-function update() {
-  let dx = 0, dy = 0;
-  if (keys["w"]) dy = -1;
-  if (keys["s"]) dy = 1;
-  if (keys["a"]) dx = -1;
-  if (keys["d"]) dx = 1;
-  if (dx || dy) movePlayer(dx, dy);
+      // Add horizontal corridors
+      for (let y = 2; y < mapHeight - 2; y += 4) {
+        for (let x = 1; x < mapWidth - 1; x++) {
+          if (Math.random() > 0.2) map[y][x] = wall;
+        }
+      }
 
-  if (keys[" "] && smoke.length < 3) smoke.push({ x: player.x, y: player.y, time: Date.now() });
-
-  redCars.forEach(car => {
-    if (car.stunned) return;
-    let dx = Math.sign(player.x - car.x);
-    let dy = Math.sign(player.y - car.y);
-    if (Math.random() < 0.5) tryMove(car, dx, 0); else tryMove(car, 0, dy);
-    if (car.x === player.x && car.y === player.y) loseLife();
-  });
-
-  smoke = smoke.filter(s => Date.now() - s.time < 3000);
-  redCars.forEach(car => {
-    if (!car.stunned && smoke.some(s => s.x === car.x && s.y === car.y)) {
-      car.stunned = true;
-      setTimeout(() => car.stunned = false, 3000);
+      // Add two dead ends
+      let count = 0;
+      while (count < 2) {
+        let x = Math.floor(Math.random() * (mapWidth - 2)) + 1;
+        let y = Math.floor(Math.random() * (mapHeight - 2)) + 1;
+        if (map[y][x] === floor) {
+          const neighbors = [[0,1],[0,-1],[1,0],[-1,0]].filter(([dx,dy]) => map[y+dy]?.[x+dx] === wall);
+          if (neighbors.length >= 3) {
+            map[y][x] = floor;
+            count++;
+          }
+        }
+      }
     }
-  });
 
-  let flagIndex = flags.findIndex(f => f.x === player.x && f.y === player.y);
-  if (flagIndex !== -1) {
-    let f = flags.splice(flagIndex, 1)[0];
-    map[f.y][f.x] = floor;
-    if (f.special) {
-      score += fuel * 100;
+    function initLevel() {
+      createMaze();
+      smoke = [];
+      bonusLevel = level % 2 === 0;
+      player = { x: 2, y: 2, dx: 0, dy: 0, color: "blue" };
+
+      // Place flags
+      flags = [];
+      while (flags.length < 10) {
+        let x = 2 + Math.floor(Math.random() * (mapWidth - 4));
+        let y = 2 + Math.floor(Math.random() * (mapHeight - 4));
+        if (map[y][x] === floor) {
+          let isBonus = flags.length === 0;
+          map[y][x] = isBonus ? bonusFlag : flag;
+          flags.push({ x, y, special: isBonus });
+        }
+      }
+
+      // Place red cars
+      redCars = [];
+      let redCount = bonusLevel ? 7 : level;
+      for (let i = 0; i < redCount; i++) {
+        let x = 5 + Math.floor(Math.random() * (mapWidth - 10));
+        let y = 5 + Math.floor(Math.random() * (mapHeight - 10));
+        if (map[y][x] === floor) {
+          redCars.push({ x, y, dx: 0, dy: 0, stunned: false, color: "red" });
+        }
+      }
+
       fuel = 90;
-    } else {
-      score += 100 * flags.length;
+      clearInterval(fuelInterval);
+      fuelInterval = setInterval(() => {
+        fuel--;
+        if (fuel <= 0) {
+          clearInterval(fuelInterval);
+          if (bonusLevel) nextLevel();
+          else loseLife();
+        }
+      }, 1000);
     }
-    if (flags.length === 0) nextLevel();
-  }
-}
-function movePlayer(dx, dy) {
-  let nx = player.x + dx, ny = player.y + dy;
-  if (map[ny]?.[nx] === floor) {
-    player.x = nx; player.y = ny;
-  }
-}
-function tryMove(obj, dx, dy) {
-  let nx = obj.x + dx, ny = obj.y + dy;
-  if (map[ny]?.[nx] === floor) { obj.x = nx; obj.y = ny; }
-}
-function loseLife() {
-  lives--;
-  if (lives <= 0) {
-    alert("Game Over! Final Score: " + score);
-    score = 0; level = 1; lives = 3;
-  }
-  nextLevel();
-}
-function nextLevel() {
-  level++;
-  bonus = level % 2 === 0;
-  map = generateMapWithDeadEnds();
-  player = initPlayer();
-  spawnRedCars(bonus ? 7 : level);
-  placeFlags();
-  startFuelTimer();
-}
-function draw() {
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  for (let y = 0; y < mapHeight; y++) {
-    for (let x = 0; x < mapWidth; x++) {
-      if (map[y][x] === wall) ctx.fillStyle = "gray";
-      else if (map[y][x] === flag) ctx.fillStyle = "yellow";
-      else if (map[y][x] === specialFlag) ctx.fillStyle = "lime";
-      else continue;
-      ctx.fillRect(x * tileSize, y * tileSize, tileSize, tileSize);
+
+    function loseLife() {
+      lives--;
+      if (lives <= 0) {
+        alert("Game Over! Score: " + score);
+        score = 0; level = 1; lives = 3;
+      }
+      nextLevel();
     }
-  }
-  smoke.forEach(s => {
-    ctx.fillStyle = "white";
-    ctx.fillRect(s.x * tileSize, s.y * tileSize, tileSize, tileSize);
-  });
-  ctx.fillStyle = player.color;
-  ctx.fillRect(player.x * tileSize, player.y * tileSize, tileSize, tileSize);
-  redCars.forEach(car => {
-    ctx.fillStyle = car.stunned ? "pink" : car.color;
-    ctx.fillRect(car.x * tileSize, car.y * tileSize, tileSize, tileSize);
-  });
-  ctx.fillStyle = "white";
-  ctx.fillText("Score: " + score + "  High: " + highScore + "  Fuel: " + fuel + "  Lives: " + lives, 10, 590);
-  drawRadar();
-}
-function drawRadar() {
-  radarCtx.clearRect(0, 0, 150, 150);
-  radarCtx.fillStyle = "blue";
-  radarCtx.fillRect(player.x * 3, player.y * 3, 3, 3);
-  radarCtx.fillStyle = "red";
-  redCars.forEach(c => radarCtx.fillRect(c.x * 3, c.y * 3, 3, 3));
-  radarCtx.fillStyle = "yellow";
-  flags.forEach(f => radarCtx.fillRect(f.x * 3, f.y * 3, 3, 3));
-}
-function gameLoop() {
-  update();
-  draw();
-  requestAnimationFrame(gameLoop);
-}
-nextLevel();
-gameLoop();
+
+    function nextLevel() {
+      level++;
+      initLevel();
+    }
+
+    function update() {
+      // Movement
+      let dx = 0, dy = 0;
+      if (keys["w"]) dy = -1;
+      if (keys["s"]) dy = 1;
+      if (keys["a"]) dx = -1;
+      if (keys["d"]) dx = 1;
+
+      if (dx || dy) {
+        let nx = player.x + dx;
+        let ny = player.y + dy;
+        if (map[ny]?.[nx] === floor) {
+          player.x = nx;
+          player.y = ny;
+        }
+      }
+
+      // Smoke
+      if (keys[" "] && smoke.length < 3) {
+        smoke.push({ x: player.x, y: player.y, time: Date.now() });
+      }
+      smoke = smoke.filter(s => Date.now() - s.time < 3000);
+
+      // Red car AI
+      redCars.forEach(car => {
+        if (bonusLevel) return;
+        if (car.stunned) return;
+        let dx = Math.sign(player.x - car.x);
+        let dy = Math.sign(player.y - car.y);
+        let nx = car.x + dx;
+        let ny = car.y + dy;
+        if (map[ny]?.[nx] === floor) {
+          car.x = nx;
+          car.y = ny;
+        }
+        if (car.x === player.x && car.y === player.y) {
+          loseLife();
+        }
+      });
+
+      // Smoke stun
+      redCars.forEach(car => {
+        if (!car.stunned && smoke.some(s => s.x === car.x && s.y === car.y)) {
+          car.stunned = true;
+          setTimeout(() => car.stunned = false, 3000);
+        }
+      });
+
+      // Collect flags
+      for (let i = 0; i < flags.length; i++) {
+        let f = flags[i];
+        if (f.x === player.x && f.y === player.y) {
+          if (f.special) {
+            score += fuel * 100;
+            fuel = 90;
+          } else {
+            score += 100 * flags.length;
+          }
+          flags.splice(i, 1);
+          map[f.y][f.x] = floor;
+          break;
+        }
+      }
+      if (flags.length === 0) nextLevel();
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      for (let y = 0; y < mapHeight; y++) {
+        for (let x = 0; x < mapWidth; x++) {
+          if (map[y][x] === wall) {
+            ctx.fillStyle = "#333";
+            ctx.fillRect(x * tileSize, y * tileSize, tileSize, tileSize);
+          } else if (map[y][x] === flag) {
+            ctx.fillStyle = "yellow";
+            ctx.fillRect(x * tileSize + 6, y * tileSize + 6, 8, 8);
+          } else if (map[y][x] === bonusFlag) {
+            ctx.fillStyle = "lime";
+            ctx.fillRect(x * tileSize + 6, y * tileSize + 6, 8, 8);
+          }
+        }
+      }
+
+      smoke.forEach(s => {
+        ctx.fillStyle = "white";
+        ctx.fillRect(s.x * tileSize, s.y * tileSize, tileSize, tileSize);
+      });
+
+      ctx.fillStyle = player.color;
+      ctx.fillRect(player.x * tileSize, player.y * tileSize, tileSize, tileSize);
+
+      redCars.forEach(car => {
+        ctx.fillStyle = car.stunned ? "pink" : car.color;
+        ctx.fillRect(car.x * tileSize, car.y * tileSize, tileSize, tileSize);
+      });
+
+      ctx.fillStyle = "white";
+      ctx.fillText(`Score: ${score}  High: ${highScore}  Fuel: ${fuel}  Lives: ${lives}`, 10, 590);
+
+      // Radar
+      rctx.clearRect(0, 0, 150, 150);
+      rctx.fillStyle = "blue";
+      rctx.fillRect(player.x * 3, player.y * 3, 3, 3);
+      redCars.forEach(c => {
+        rctx.fillStyle = "red";
+        rctx.fillRect(c.x * 3, c.y * 3, 3, 3);
+      });
+      flags.forEach(f => {
+        rctx.fillStyle = f.special ? "lime" : "yellow";
+        rctx.fillRect(f.x * 3, f.y * 3, 3, 3);
+      });
+    }
+
+    function loop() {
+      update();
+      draw();
+      requestAnimationFrame(loop);
+    }
+
+    initLevel();
+    loop();
   </script>
 </body>
 </html>
