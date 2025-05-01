@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>New Rally-X Clone</title>
+  <style>
+    canvas { background: #222; display: block; margin: 0 auto; }
+    body { text-align: center; color: white; font-family: sans-serif; }
+  </style>
+</head>
+<body>
+  <h1>New Rally-X</h1>
+  <canvas id="game" width="800" height="600"></canvas>
+  <script>
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+
+    const tileSize = 40;
+    const mapWidth = 50;
+    const mapHeight = 40;
+
+    const player = {
+      x: 5 * tileSize,
+      y: 5 * tileSize,
+      size: 30,
+      color: 'blue',
+      speed: 2,
+      dx: 0,
+      dy: 0,
+      fuel: 100,
+      lives: 3,
+      score: 0,
+      smoke: 3
+    };
+
+    let keys = {};
+    let redCars = [];
+    let flags = [];
+    let level = 1;
+    let isBonus = false;
+    let stunnedRedCars = {};
+    let camera = { x: 0, y: 0 };
+    let oneFlagMultiplier = 1;
+    let highScore = 20000;
+
+    const smokeClouds = [];
+
+    function spawnFlags() {
+      flags = [];
+      for (let i = 0; i < 10; i++) {
+        flags.push({
+          x: Math.floor(Math.random() * mapWidth) * tileSize,
+          y: Math.floor(Math.random() * mapHeight) * tileSize,
+          bonus: i === 0
+        });
+      }
+    }
+
+    function spawnRedCars() {
+      redCars = [];
+      const count = isBonus ? 7 : level;
+      for (let i = 0; i < count; i++) {
+        redCars.push({
+          x: Math.floor(Math.random() * mapWidth) * tileSize,
+          y: Math.floor(Math.random() * mapHeight) * tileSize,
+          speed: 1.5,
+        });
+      }
+    }
+
+    function updatePlayer() {
+      player.dx = 0;
+      player.dy = 0;
+      if (keys['w']) player.dy = -player.speed;
+      if (keys['s']) player.dy = player.speed;
+      if (keys['a']) player.dx = -player.speed;
+      if (keys['d']) player.dx = player.speed;
+
+      player.x += player.dx;
+      player.y += player.dy;
+
+      player.fuel -= 0.05;
+      if (player.fuel <= 0) {
+        if (isBonus) nextLevel();
+        else loseLife();
+      }
+
+      camera.x = player.x - canvas.width / 2;
+      camera.y = player.y - canvas.height / 2;
+    }
+
+    function updateRedCars() {
+      for (const car of redCars) {
+        const id = redCars.indexOf(car);
+        if (isBonus) continue;
+        if (stunnedRedCars[id]) continue;
+        const dx = player.x - car.x;
+        const dy = player.y - car.y;
+        const dist = Math.hypot(dx, dy);
+        car.x += (dx / dist) * car.speed * (Math.random() * 0.8 + 0.2);
+        car.y += (dy / dist) * car.speed * (Math.random() * 0.8 + 0.2);
+      }
+    }
+
+    function handleCollisions() {
+      redCars.forEach((car, i) => {
+        if (Math.hypot(player.x - car.x, player.y - car.y) < 30) {
+          loseLife();
+        }
+      });
+
+      for (let i = flags.length - 1; i >= 0; i--) {
+        const f = flags[i];
+        if (Math.hypot(player.x - f.x, player.y - f.y) < 30) {
+          if (f.bonus) {
+            player.score += Math.floor(player.fuel * 10);
+            player.fuel = 100;
+            oneFlagMultiplier = flags.length - 1;
+          } else {
+            player.score += 100 * oneFlagMultiplier;
+          }
+          flags.splice(i, 1);
+          if (flags.length === 0) {
+            nextLevel();
+          }
+        }
+      }
+
+      for (let i = smokeClouds.length - 1; i >= 0; i--) {
+        const cloud = smokeClouds[i];
+        if (Date.now() - cloud.time > 3000) {
+          smokeClouds.splice(i, 1);
+          continue;
+        }
+        redCars.forEach((car, j) => {
+          if (!stunnedRedCars[j] && Math.hypot(car.x - cloud.x, car.y - cloud.y) < 30) {
+            stunnedRedCars[j] = true;
+            setTimeout(() => delete stunnedRedCars[j], 3000);
+          }
+        });
+      }
+    }
+
+    function loseLife() {
+      player.lives--;
+      if (player.lives <= 0) {
+        alert(`Game Over. Your score: ${player.score}`);
+        location.reload();
+      } else {
+        player.x = 5 * tileSize;
+        player.y = 5 * tileSize;
+        player.fuel = 100;
+        spawnRedCars();
+      }
+    }
+
+    function nextLevel() {
+      level++;
+      isBonus = level % 2 === 0;
+      player.fuel = 100;
+      player.smoke = 3;
+      oneFlagMultiplier = 1;
+      spawnFlags();
+      spawnRedCars();
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      ctx.save();
+      ctx.translate(-camera.x, -camera.y);
+
+      // draw map tiles
+      for (let y = 0; y < mapHeight; y++) {
+        for (let x = 0; x < mapWidth; x++) {
+          ctx.strokeStyle = "#333";
+          ctx.strokeRect(x * tileSize, y * tileSize, tileSize, tileSize);
+        }
+      }
+
+      // draw flags
+      for (const f of flags) {
+        ctx.fillStyle = f.bonus ? 'yellow' : 'white';
+        ctx.fillRect(f.x + 10, f.y + 10, 20, 20);
+      }
+
+      // draw smoke
+      for (const s of smokeClouds) {
+        ctx.fillStyle = "gray";
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, 20, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // draw red cars
+      for (const car of redCars) {
+        ctx.fillStyle = 'red';
+        ctx.fillRect(car.x, car.y, player.size, player.size);
+      }
+
+      // draw player
+      ctx.fillStyle = player.color;
+      ctx.fillRect(player.x, player.y, player.size, player.size);
+
+      ctx.restore();
+
+      // HUD
+      ctx.fillStyle = "white";
+      ctx.fillText(`Level: ${level} ${isBonus ? "(Bonus)" : ""}`, 10, 20);
+      ctx.fillText(`Score: ${player.score}`, 10, 40);
+      ctx.fillText(`Fuel: ${Math.floor(player.fuel)}`, 10, 60);
+      ctx.fillText(`Lives: ${player.lives}`, 10, 80);
+      ctx.fillText(`Smoke: ${player.smoke}`, 10, 100);
+      ctx.fillText(`High Score: ${highScore}`, 10, 120);
+    }
+
+    function gameLoop() {
+      updatePlayer();
+      updateRedCars();
+      handleCollisions();
+      draw();
+      requestAnimationFrame(gameLoop);
+    }
+
+    window.addEventListener('keydown', (e) => {
+      keys[e.key.toLowerCase()] = true;
+      if (e.code === 'Space' && player.smoke > 0) {
+        smokeClouds.push({ x: player.x, y: player.y, time: Date.now() });
+        player.smoke--;
+      }
+    });
+
+    window.addEventListener('keyup', (e) => {
+      keys[e.key.toLowerCase()] = false;
+    });
+
+    spawnFlags();
+    spawnRedCars();
+    gameLoop();
+  </script>
+</body>
+</html>
