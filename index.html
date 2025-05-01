@@ -7,19 +7,24 @@
   <style>
     body { margin: 0; overflow: hidden; }
     canvas { display: block; background-color: #f0f0f0; }
+    #gameCanvas { background: #aaa; }
   </style>
 </head>
 <body>
   <canvas id="gameCanvas"></canvas>
+
   <script>
-    // Set up canvas and game variables
+    // Set up the canvas and game variables
     const canvas = document.getElementById('gameCanvas');
     const ctx = canvas.getContext('2d');
     canvas.width = 800;
     canvas.height = 600;
 
-    const tileSize = 40; // Size of each tile
+    const tileSize = 40;
+    const playerSpeed = 4;
+    const cpuSpeed = 2;
     let player, cpus = [], flags = [], score = 0;
+    let fuel = 100;
 
     // Player Car Setup
     class Player {
@@ -29,7 +34,6 @@
         this.width = 30;
         this.height = 30;
         this.color = 'blue';
-        this.speed = 5;
         this.direction = { x: 0, y: 0 };
       }
 
@@ -37,11 +41,14 @@
         this.x += this.direction.x;
         this.y += this.direction.y;
 
-        // Prevent going off canvas
+        // Boundary checking
         if (this.x < 0) this.x = 0;
         if (this.y < 0) this.y = 0;
         if (this.x > canvas.width - this.width) this.x = canvas.width - this.width;
         if (this.y > canvas.height - this.height) this.y = canvas.height - this.height;
+
+        // Decrease fuel
+        fuel -= 0.05;
       }
 
       draw() {
@@ -50,7 +57,7 @@
       }
     }
 
-    // CPU Car Setup
+    // CPU Car Setup (AI Cars)
     class CPU {
       constructor(x, y) {
         this.x = x;
@@ -58,7 +65,6 @@
         this.width = 30;
         this.height = 30;
         this.color = 'red';
-        this.speed = 2;
       }
 
       move(player) {
@@ -67,8 +73,8 @@
         const dist = Math.sqrt(dx * dx + dy * dy);
 
         if (dist > 0) {
-          this.x += (dx / dist) * this.speed;
-          this.y += (dy / dist) * this.speed;
+          this.x += (dx / dist) * cpuSpeed;
+          this.y += (dy / dist) * cpuSpeed;
         }
       }
 
@@ -94,12 +100,21 @@
       }
     }
 
-    // Initialize Game
+    // Initialize the game
     function init() {
       player = new Player();
-      cpus = [new CPU(200, 200), new CPU(400, 300), new CPU(600, 400)];
-      flags = [new Flag(300, 150), new Flag(500, 450)];
+      cpus = [
+        new CPU(200, 200),
+        new CPU(400, 300),
+        new CPU(600, 400)
+      ];
+      flags = [
+        new Flag(300, 150),
+        new Flag(500, 450),
+        new Flag(650, 100)
+      ];
       score = 0;
+      fuel = 100;
       gameLoop();
     }
 
@@ -107,7 +122,7 @@
     function gameLoop() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // Move and draw player and CPUs
+      // Move and draw the player and CPUs
       player.move();
       player.draw();
       cpus.forEach(cpu => {
@@ -121,11 +136,10 @@
         if (isColliding(player, flag)) {
           flags.splice(index, 1);
           score += 10;
-          console.log('Score:', score);
         }
       });
 
-      // Game Over check (if player collides with any CPU)
+      // Check for collision with CPUs (Game Over condition)
       cpus.forEach(cpu => {
         if (isColliding(player, cpu)) {
           alert('Game Over! Final Score: ' + score);
@@ -133,10 +147,19 @@
         }
       });
 
-      // Draw score
+      // Draw score and fuel
       ctx.fillStyle = 'black';
       ctx.font = '20px Arial';
       ctx.fillText('Score: ' + score, 10, 30);
+      ctx.fillText('Fuel: ' + Math.round(fuel), 10, 50);
+
+      if (fuel <= 0) {
+        alert('Game Over! Out of Fuel');
+        init();
+      }
+
+      // Radar (mini-map)
+      drawRadar();
 
       requestAnimationFrame(gameLoop);
     }
@@ -149,12 +172,31 @@
              rect1.y + rect1.height > rect2.y;
     }
 
-    // Control player movement with keyboard
+    // Draw radar (Mini-map)
+    function drawRadar() {
+      ctx.strokeStyle = 'black';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(canvas.width - 150, 10, 140, 140);
+      ctx.fillStyle = 'green';
+      ctx.fillRect(canvas.width - 150 + player.x / 10, 10 + player.y / 10, 5, 5);
+
+      cpus.forEach(cpu => {
+        ctx.fillStyle = 'red';
+        ctx.fillRect(canvas.width - 150 + cpu.x / 10, 10 + cpu.y / 10, 5, 5);
+      });
+
+      flags.forEach(flag => {
+        ctx.fillStyle = 'yellow';
+        ctx.fillRect(canvas.width - 150 + flag.x / 10, 10 + flag.y / 10, 5, 5);
+      });
+    }
+
+    // Player movement controls (Arrow keys)
     document.addEventListener('keydown', function(event) {
-      if (event.key === 'ArrowUp') player.direction.y = -player.speed;
-      if (event.key === 'ArrowDown') player.direction.y = player.speed;
-      if (event.key === 'ArrowLeft') player.direction.x = -player.speed;
-      if (event.key === 'ArrowRight') player.direction.x = player.speed;
+      if (event.key === 'ArrowUp') player.direction.y = -playerSpeed;
+      if (event.key === 'ArrowDown') player.direction.y = playerSpeed;
+      if (event.key === 'ArrowLeft') player.direction.x = -playerSpeed;
+      if (event.key === 'ArrowRight') player.direction.x = playerSpeed;
     });
 
     document.addEventListener('keyup', function(event) {
