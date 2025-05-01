@@ -1,260 +1,216 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>New Rally-X Clone</title>
-  <style>
-    body { margin: 0; background: black; color: white; font-family: sans-serif; overflow: hidden; }
-    canvas { display: block; margin: 0 auto; background: #111; }
-    #radar {
-      position: absolute;
-      bottom: 10px;
-      left: 10px;
-      width: 150px;
-      height: 150px;
-      background: #222;
-      border: 2px solid #fff;
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>New Rally-X Clone</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+        }
+        canvas {
+            background-color: #000;
+            display: block;
+            margin: 0 auto;
+        }
+    </style>
 </head>
 <body>
-  <audio id="bg-music" autoplay loop>
-    <source src="https://archive.org/download/NewRallyX/Namco%20-%20New%20Rally-X%20-%20BGM.mp3" type="audio/mpeg">
-  </audio>
-  <canvas id="game" width="800" height="600"></canvas>
-  <canvas id="radar" width="150" height="150"></canvas>
-  <script>
-    const canvas = document.getElementById("game");
-    const ctx = canvas.getContext("2d");
-    const radar = document.getElementById("radar");
-    const rctx = radar.getContext("2d");
+    <canvas id="gameCanvas" width="800" height="600"></canvas>
+    <script>
+        const canvas = document.getElementById("gameCanvas");
+        const ctx = canvas.getContext("2d");
+        const tileSize = 40;
+        let keys = {};
+        let player, enemies = [], flags = [], gameInterval;
+        let level = 1, score = 0, lives = 3;
 
-    const tileSize = 20;
-    const mapWidth = 40;
-    const mapHeight = 30;
-    const floor = 0, wall = 1, flag = 2, bonusFlag = 3;
+        // Load images
+        const playerImg = new Image();
+        playerImg.src = 'player.png'; // Replace with your actual image path
+        const enemyImg = new Image();
+        enemyImg.src = 'enemy.png'; // Replace with your actual image path
+        const flagImg = new Image();
+        flagImg.src = 'flag.png'; // Replace with your actual image path
 
-    let map, player, redCars = [], flags = [], smoke = [];
-    let score = 0, highScore = 20000, level = 1, fuel = 90, lives = 3;
-    let bonusLevel = false, keys = {};
-    let fuelInterval;
-
-    document.addEventListener("keydown", e => keys[e.key] = true);
-    document.addEventListener("keyup", e => keys[e.key] = false);
-
-    function createMaze() {
-      // Generate empty map with walls around
-      map = Array.from({ length: mapHeight }, (_, y) =>
-        Array.from({ length: mapWidth }, (_, x) =>
-          (x === 0 || y === 0 || x === mapWidth - 1 || y === mapHeight - 1) ? wall : floor
-        )
-      );
-
-      // Add vertical corridors
-      for (let x = 2; x < mapWidth - 2; x += 4) {
-        for (let y = 1; y < mapHeight - 1; y++) {
-          if (Math.random() > 0.2) map[y][x] = wall;
+        // Car class
+        function Car(x, y, image) {
+            this.x = x;
+            this.y = y;
+            this.speed = 2;
+            this.image = image;
+            this.width = tileSize;
+            this.height = tileSize;
+            this.direction = { x: 0, y: 0 };
         }
-      }
 
-      // Add horizontal corridors
-      for (let y = 2; y < mapHeight - 2; y += 4) {
-        for (let x = 1; x < mapWidth - 1; x++) {
-          if (Math.random() > 0.2) map[y][x] = wall;
+        // Handle keyboard input
+        window.addEventListener("keydown", (e) => {
+            keys[e.key] = true;
+        });
+        window.addEventListener("keyup", (e) => {
+            keys[e.key] = false;
+        });
+
+        // Setup map
+        const map = [
+            "WWWWWWWWWWWWWWWWWW",
+            "W              W W",
+            "W WWWWWWWWWWWWWWW W",
+            "W W            W W",
+            "W W WWWWWWWWWWW W W",
+            "W W            W W",
+            "W W W WWWWWWW W W W",
+            "W W W        W W W",
+            "W W W WW WWWWW W W",
+            "W W            W W",
+            "W W W WWWWWW W W W",
+            "W              W W",
+            "WWWWWWWWWWWWWWWWWW"
+        ];
+
+        // Create a random number of flags on the map
+        function placeFlags() {
+            flags = [];
+            for (let row = 0; row < map.length; row++) {
+                for (let col = 0; col < map[row].length; col++) {
+                    if (map[row][col] === " ") {
+                        if (Math.random() < 0.1) { // 10% chance to place a flag
+                            flags.push({ x: col * tileSize, y: row * tileSize });
+                        }
+                    }
+                }
+            }
         }
-      }
 
-      // Add two dead ends
-      let count = 0;
-      while (count < 2) {
-        let x = Math.floor(Math.random() * (mapWidth - 2)) + 1;
-        let y = Math.floor(Math.random() * (mapHeight - 2)) + 1;
-        if (map[y][x] === floor) {
-          const neighbors = [[0,1],[0,-1],[1,0],[-1,0]].filter(([dx,dy]) => map[y+dy]?.[x+dx] === wall);
-          if (neighbors.length >= 3) {
-            map[y][x] = floor;
-            count++;
-          }
+        // Create the player and enemies
+        function resetGame() {
+            player = new Car(100, 100, playerImg);
+            placeFlags();
+            enemies = [new Car(200, 200, enemyImg)];
+            score = 0;
+            level = 1;
         }
-      }
-    }
 
-    function initLevel() {
-      createMaze();
-      smoke = [];
-      bonusLevel = level % 2 === 0;
-      player = { x: 2, y: 2, dx: 0, dy: 0, color: "blue" };
+        // Move the player
+        function moveCar(car) {
+            if (keys["w"]) car.direction.y = -1;
+            if (keys["s"]) car.direction.y = 1;
+            if (keys["a"]) car.direction.x = -1;
+            if (keys["d"]) car.direction.x = 1;
 
-      // Place flags
-      flags = [];
-      while (flags.length < 10) {
-        let x = 2 + Math.floor(Math.random() * (mapWidth - 4));
-        let y = 2 + Math.floor(Math.random() * (mapHeight - 4));
-        if (map[y][x] === floor) {
-          let isBonus = flags.length === 0;
-          map[y][x] = isBonus ? bonusFlag : flag;
-          flags.push({ x, y, special: isBonus });
+            car.x += car.direction.x * car.speed;
+            car.y += car.direction.y * car.speed;
+            car.direction.x = 0;
+            car.direction.y = 0;
         }
-      }
 
-      // Place red cars
-      redCars = [];
-      let redCount = bonusLevel ? 7 : level;
-      for (let i = 0; i < redCount; i++) {
-        let x = 5 + Math.floor(Math.random() * (mapWidth - 10));
-        let y = 5 + Math.floor(Math.random() * (mapHeight - 10));
-        if (map[y][x] === floor) {
-          redCars.push({ x, y, dx: 0, dy: 0, stunned: false, color: "red" });
+        // Draw the map (walls and flags)
+        function drawMap() {
+            for (let row = 0; row < map.length; row++) {
+                for (let col = 0; col < map[row].length; col++) {
+                    if (map[row][col] === "W") {
+                        ctx.fillStyle = "gray";
+                        ctx.fillRect(col * tileSize, row * tileSize, tileSize, tileSize);
+                    }
+                }
+            }
+
+            // Draw flags
+            for (let flag of flags) {
+                ctx.drawImage(flagImg, flag.x + 12, flag.y + 12, 16, 16);
+            }
         }
-      }
 
-      fuel = 90;
-      clearInterval(fuelInterval);
-      fuelInterval = setInterval(() => {
-        fuel--;
-        if (fuel <= 0) {
-          clearInterval(fuelInterval);
-          if (bonusLevel) nextLevel();
-          else loseLife();
+        // Collision detection for flags
+        function checkFlagCollision() {
+            for (let i = 0; i < flags.length; i++) {
+                const flag = flags[i];
+                if (player.x < flag.x + tileSize && player.x + tileSize > flag.x &&
+                    player.y < flag.y + tileSize && player.y + tileSize > flag.y) {
+                    flags.splice(i, 1);
+                    score += 100; // Increase score for flag collection
+                    break;
+                }
+            }
         }
-      }, 1000);
-    }
 
-    function loseLife() {
-      lives--;
-      if (lives <= 0) {
-        alert("Game Over! Score: " + score);
-        score = 0; level = 1; lives = 3;
-      }
-      nextLevel();
-    }
+        // Draw the player and enemies
+        function drawCars() {
+            ctx.drawImage(player.image, player.x, player.y, player.width, player.height);
 
-    function nextLevel() {
-      level++;
-      initLevel();
-    }
-
-    function update() {
-      // Movement
-      let dx = 0, dy = 0;
-      if (keys["w"]) dy = -1;
-      if (keys["s"]) dy = 1;
-      if (keys["a"]) dx = -1;
-      if (keys["d"]) dx = 1;
-
-      if (dx || dy) {
-        let nx = player.x + dx;
-        let ny = player.y + dy;
-        if (map[ny]?.[nx] === floor) {
-          player.x = nx;
-          player.y = ny;
+            for (let enemy of enemies) {
+                ctx.drawImage(enemy.image, enemy.x, enemy.y, enemy.width, enemy.height);
+            }
         }
-      }
 
-      // Smoke
-      if (keys[" "] && smoke.length < 3) {
-        smoke.push({ x: player.x, y: player.y, time: Date.now() });
-      }
-      smoke = smoke.filter(s => Date.now() - s.time < 3000);
-
-      // Red car AI
-      redCars.forEach(car => {
-        if (bonusLevel) return;
-        if (car.stunned) return;
-        let dx = Math.sign(player.x - car.x);
-        let dy = Math.sign(player.y - car.y);
-        let nx = car.x + dx;
-        let ny = car.y + dy;
-        if (map[ny]?.[nx] === floor) {
-          car.x = nx;
-          car.y = ny;
+        // Improved enemy AI movement (follow player)
+        function moveEnemies() {
+            for (let enemy of enemies) {
+                let dx = player.x - enemy.x;
+                let dy = player.y - enemy.y;
+                let dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist > tileSize) {
+                    enemy.x += (dx / dist) * enemy.speed;
+                    enemy.y += (dy / dist) * enemy.speed;
+                }
+            }
         }
-        if (car.x === player.x && car.y === player.y) {
-          loseLife();
+
+        // Check for collisions with walls
+        function checkWallCollisions() {
+            const playerRect = { x: player.x, y: player.y, width: player.width, height: player.height };
+            for (let row = 0; row < map.length; row++) {
+                for (let col = 0; col < map[row].length; col++) {
+                    if (map[row][col] === "W") {
+                        const wallRect = { x: col * tileSize, y: row * tileSize, width: tileSize, height: tileSize };
+                        if (isColliding(playerRect, wallRect)) {
+                            player.x = playerRect.x;
+                            player.y = playerRect.y;
+                        }
+                    }
+                }
+            }
         }
-      });
 
-      // Smoke stun
-      redCars.forEach(car => {
-        if (!car.stunned && smoke.some(s => s.x === car.x && s.y === car.y)) {
-          car.stunned = true;
-          setTimeout(() => car.stunned = false, 3000);
+        // Collision detection
+        function isColliding(rect1, rect2) {
+            return rect1.x < rect2.x + rect2.width &&
+                   rect1.x + rect1.width > rect2.x &&
+                   rect1.y < rect2.y + rect2.height &&
+                   rect1.y + rect1.height > rect2.y;
         }
-      });
 
-      // Collect flags
-      for (let i = 0; i < flags.length; i++) {
-        let f = flags[i];
-        if (f.x === player.x && f.y === player.y) {
-          if (f.special) {
-            score += fuel * 100;
-            fuel = 90;
-          } else {
-            score += 100 * flags.length;
-          }
-          flags.splice(i, 1);
-          map[f.y][f.x] = floor;
-          break;
+        // Game loop
+        function gameLoop() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            moveCar(player);
+            moveEnemies();
+            drawMap();
+            drawCars();
+            checkFlagCollision();
+            checkWallCollisions();
+
+            // Check if game over
+            if (lives <= 0) {
+                alert("Game Over! Final Score: " + score);
+                resetGame();
+            }
+
+            // Level up if all flags are collected
+            if (flags.length === 0) {
+                level++;
+                placeFlags();
+                enemies.push(new Car(200 + (level - 1) * 30, 200 + (level - 1) * 30, enemyImg));
+            }
+
+            requestAnimationFrame(gameLoop);
         }
-      }
-      if (flags.length === 0) nextLevel();
-    }
 
-    function draw() {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      for (let y = 0; y < mapHeight; y++) {
-        for (let x = 0; x < mapWidth; x++) {
-          if (map[y][x] === wall) {
-            ctx.fillStyle = "#333";
-            ctx.fillRect(x * tileSize, y * tileSize, tileSize, tileSize);
-          } else if (map[y][x] === flag) {
-            ctx.fillStyle = "yellow";
-            ctx.fillRect(x * tileSize + 6, y * tileSize + 6, 8, 8);
-          } else if (map[y][x] === bonusFlag) {
-            ctx.fillStyle = "lime";
-            ctx.fillRect(x * tileSize + 6, y * tileSize + 6, 8, 8);
-          }
-        }
-      }
-
-      smoke.forEach(s => {
-        ctx.fillStyle = "white";
-        ctx.fillRect(s.x * tileSize, s.y * tileSize, tileSize, tileSize);
-      });
-
-      ctx.fillStyle = player.color;
-      ctx.fillRect(player.x * tileSize, player.y * tileSize, tileSize, tileSize);
-
-      redCars.forEach(car => {
-        ctx.fillStyle = car.stunned ? "pink" : car.color;
-        ctx.fillRect(car.x * tileSize, car.y * tileSize, tileSize, tileSize);
-      });
-
-      ctx.fillStyle = "white";
-      ctx.fillText(`Score: ${score}  High: ${highScore}  Fuel: ${fuel}  Lives: ${lives}`, 10, 590);
-
-      // Radar
-      rctx.clearRect(0, 0, 150, 150);
-      rctx.fillStyle = "blue";
-      rctx.fillRect(player.x * 3, player.y * 3, 3, 3);
-      redCars.forEach(c => {
-        rctx.fillStyle = "red";
-        rctx.fillRect(c.x * 3, c.y * 3, 3, 3);
-      });
-      flags.forEach(f => {
-        rctx.fillStyle = f.special ? "lime" : "yellow";
-        rctx.fillRect(f.x * 3, f.y * 3, 3, 3);
-      });
-    }
-
-    function loop() {
-      update();
-      draw();
-      requestAnimationFrame(loop);
-    }
-
-    initLevel();
-    loop();
-  </script>
+        // Start the game
+        resetGame();
+        gameLoop();
+    </script>
 </body>
 </html>
